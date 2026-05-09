@@ -1701,8 +1701,7 @@
             if (shiftTime && shiftTime.start && shiftTime.end) {
               const timeLabel = document.createElement('div');
               timeLabel.className = 'shift-time';
-              timeLabel.textContent =
-                `${formatTime(shiftTime.start)}-${formatTime(shiftTime.end)}`;
+              timeLabel.textContent = `${formatTime(shiftTime.start)}-${formatTime(shiftTime.end)}`;
               cell.appendChild(timeLabel);
             }
           }
@@ -1839,8 +1838,7 @@
             const setting = deadlineSettingsMap.get(getEmploymentType());
             const deadlineDay = setting?.deadline_day || 10;
             const deadlineTime = setting?.deadline_time || '12:00';
-            deadlineInfo.innerHTML =
-              `⚠️ <strong>${year}年${month}月のシフト希望入力期限は${prevYear}年${prevMonth}月${deadlineDay}日${deadlineTime}で終了しました</strong><br>既存の希望は閲覧できますが、編集・新規登録はできません。`;
+            deadlineInfo.innerHTML = `⚠️ <strong>${year}年${month}月のシフト希望入力期限は${prevYear}年${prevMonth}月${deadlineDay}日${deadlineTime}で終了しました</strong><br>既存の希望は閲覧できますが、編集・新規登録はできません。`;
             deadlineInfo.style.display = 'block';
             deadlineInfo.style.background = '#fff3cd';
             document.getElementById('submitBtn').disabled = true;
@@ -1894,8 +1892,7 @@
           const setting = deadlineSettingsMap.get(getEmploymentType());
           const deadlineDay = setting?.deadline_day || 10;
           const deadlineTime = setting?.deadline_time || '12:00';
-          deadlineInfo.innerHTML =
-            `📅 ${year}年${month}月のシフト希望入力期限: ${prevYear}年${prevMonth}月${deadlineDay}日${deadlineTime}まで`;
+          deadlineInfo.innerHTML = `📅 ${year}年${month}月のシフト希望入力期限: ${prevYear}年${prevMonth}月${deadlineDay}日${deadlineTime}まで`;
           deadlineInfo.style.display = 'block';
           document.getElementById('submitBtn').disabled = false;
         } else {
