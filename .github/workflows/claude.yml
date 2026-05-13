@@ -72,7 +72,7 @@ jobs:
           echo "Created PR #${PR_NUM} ($PR_URL)"
           echo "pr_number=${PR_NUM}" >> "$GITHUB_OUTPUT"
 
-      - name: Auto-merge (if labeled)
+      - name: Auto-merge (if labeled, after CI)
         if: |
           github.event_name == 'issues' &&
           contains(github.event.issue.labels.*.name, 'auto-merge') &&
@@ -82,10 +82,19 @@ jobs:
         run: |
           set -e
           PR_NUM="${{ steps.pr-create.outputs.pr_number }}"
-          echo "Enabling auto-merge for PR #${PR_NUM} (squash + delete branch, after CI)"
-          # --auto: GitHub native auto-merge. CI 通過後に自動で squash merge + branch 削除
+          echo "Waiting for CI checks to complete on PR #${PR_NUM} (max 30 min)..."
+          # PR 作成 → workflow trigger までのラグを吸収
+          sleep 10
+          # 全check完了まで待機。失敗があれば exit 非0 でこのstepも fail
+          # check が無いリポは即時 exit 0（無問題）
+          # GitHub Free + Private では --auto が使えないため polling 方式
+          if ! gh pr checks "$PR_NUM" --watch --interval 10; then
+            echo "CI failed or some checks failed; not merging PR #${PR_NUM}"
+            exit 1
+          fi
+          echo "All checks passed. Squash merging PR #${PR_NUM}"
+          gh pr merge "$PR_NUM" --squash --delete-branch
           # Issue close は merge イベント発火後に close-issue-on-merge ジョブが処理する
-          gh pr merge "$PR_NUM" --auto --squash --delete-branch
 
   close-issue-on-merge:
     # PR が merge されたら、PR body の "Closes #N" から Issue を探して閉じる
