@@ -109,13 +109,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_BODY: ${{ github.event.pull_request.body }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
           set -e
           PR_NUM="${{ github.event.pull_request.number }}"
+          # 1) PR body から "Closes #N" を抽出
           ISSUE_NUM=$(echo "$PR_BODY" | grep -oE 'Closes #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
+          # 2) 見つからない場合、branch 名 claude/issue-<N>-* から抽出 (claude-code-action 生成 PR 対応)
+          if [ -z "$ISSUE_NUM" ]; then
+            ISSUE_NUM=$(echo "$PR_BRANCH" | grep -oE '^claude/issue-[0-9]+' | grep -oE '[0-9]+' || true)
+          fi
           if [ -n "$ISSUE_NUM" ]; then
-            echo "Closing issue #${ISSUE_NUM} (linked from PR #${PR_NUM})"
+            echo "Closing issue #${ISSUE_NUM} (linked from PR #${PR_NUM}, branch=$PR_BRANCH)"
             gh issue close "$ISSUE_NUM" --repo "${{ github.repository }}" --comment "Auto-resolved by PR #${PR_NUM}"
           else
-            echo "No 'Closes #N' found in PR body; skipping issue close"
+            echo "No 'Closes #N' in PR body and no claude/issue-<N> branch; skipping issue close"
           fi
