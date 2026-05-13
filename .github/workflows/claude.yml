@@ -3,6 +3,8 @@ name: Claude Code
 on:
   issues:
     types: [opened]   # labeled は併発防止のため除外
+  pull_request:
+    types: [closed]
   issue_comment:
     types: [created]
   pull_request_review_comment:
@@ -80,10 +82,31 @@ jobs:
         run: |
           set -e
           PR_NUM="${{ steps.pr-create.outputs.pr_number }}"
-          ISSUE_NUM="${{ github.event.issue.number }}"
-          echo "Merging PR #${PR_NUM} (squash + delete branch)"
-          # branch protection 不要のリポなので即マージ
-          # CIあるリポでは --auto に変更
-          gh pr merge "$PR_NUM" --squash --delete-branch
-          # GitHub Actions が作ったPRは "Closes #N" の auto-link が効かないため明示的にクローズ
-          gh issue close "$ISSUE_NUM" --comment "Auto-resolved by PR #${PR_NUM}"
+          echo "Enabling auto-merge for PR #${PR_NUM} (squash + delete branch, after CI)"
+          # --auto: GitHub native auto-merge. CI 通過後に自動で squash merge + branch 削除
+          # Issue close は merge イベント発火後に close-issue-on-merge ジョブが処理する
+          gh pr merge "$PR_NUM" --auto --squash --delete-branch
+
+  close-issue-on-merge:
+    # PR が merge されたら、PR body の "Closes #N" から Issue を探して閉じる
+    # GitHub Actions が作成した PR は "Closes #N" の auto-link が効かないため明示的にクローズする
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Close linked issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -e
+          PR_NUM="${{ github.event.pull_request.number }}"
+          ISSUE_NUM=$(echo "$PR_BODY" | grep -oE 'Closes #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
+          if [ -n "$ISSUE_NUM" ]; then
+            echo "Closing issue #${ISSUE_NUM} (linked from PR #${PR_NUM})"
+            gh issue close "$ISSUE_NUM" --repo "${{ github.repository }}" --comment "Auto-resolved by PR #${PR_NUM}"
+          else
+            echo "No 'Closes #N' found in PR body; skipping issue close"
+          fi
