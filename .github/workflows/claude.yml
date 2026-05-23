@@ -1,8 +1,11 @@
 name: Claude Code
 
+# このファイルを各リポの .github/workflows/claude.yml にコピーして使う。
+# ロジックは MNML-LLC/.github の claude-reusable.yml で一元管理。
+
 on:
   issues:
-    types: [opened]   # labeled は併発防止のため除外
+    types: [opened]
   pull_request:
     types: [closed]
   issue_comment:
@@ -14,114 +17,8 @@ permissions:
   contents: write
   issues: write
   pull-requests: write
-  id-token: write
 
 jobs:
-  claude:
-    if: |
-      (github.event_name == 'issues' && contains(github.event.issue.body, '@claude')) ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Run Claude Code
-        id: claude
-        uses: anthropics/claude-code-action@v1
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_tools: "Bash(npm*),Bash(npx*),Bash(node*),Bash(yarn*),Bash(pnpm*),Bash(uv*),Bash(python*),Bash(python3*),Bash(pip*),Bash(ruff*),Bash(make*)"
-
-      - name: Auto-create PR (if claude branch exists)
-        id: pr-create
-        if: github.event_name == 'issues'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -e
-          ISSUE_NUM="${{ github.event.issue.number }}"
-          ISSUE_TITLE='${{ github.event.issue.title }}'
-          # claude-code-action 終了後は git credential が revoke 済みのため
-          # gh API 経由でブランチを探す (git fetch を避ける)
-          BRANCH=$(gh api "repos/${{ github.repository }}/branches" --paginate \
-            --jq ".[] | select(.name | startswith(\"claude/issue-${ISSUE_NUM}-\")) | .name" \
-            | head -1)
-          if [ -z "$BRANCH" ]; then
-            echo "No claude branch for issue #${ISSUE_NUM}, skipping PR creation"
-            echo "pr_number=" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "Found branch: $BRANCH"
-          EXISTING=$(gh pr list --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || echo "")
-          if [ -n "$EXISTING" ]; then
-            echo "PR already exists: #$EXISTING"
-            echo "pr_number=$EXISTING" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          PR_URL=$(gh pr create \
-            --base main \
-            --head "$BRANCH" \
-            --title "$ISSUE_TITLE" \
-            --body "Closes #${ISSUE_NUM}")
-          PR_NUM=$(echo "$PR_URL" | rev | cut -d/ -f1 | rev)
-          echo "Created PR #${PR_NUM} ($PR_URL)"
-          echo "pr_number=${PR_NUM}" >> "$GITHUB_OUTPUT"
-
-      - name: Auto-merge (if labeled, after CI)
-        if: |
-          github.event_name == 'issues' &&
-          contains(github.event.issue.labels.*.name, 'auto-merge') &&
-          steps.pr-create.outputs.pr_number != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -e
-          PR_NUM="${{ steps.pr-create.outputs.pr_number }}"
-          echo "Waiting for CI checks to complete on PR #${PR_NUM} (max 30 min)..."
-          # PR 作成 → workflow trigger までのラグを吸収
-          sleep 10
-          # 全check完了まで待機。失敗があれば exit 非0 でこのstepも fail
-          # check が無いリポは即時 exit 0（無問題）
-          # GitHub Free + Private では --auto が使えないため polling 方式
-          if ! gh pr checks "$PR_NUM" --watch --interval 10; then
-            echo "CI failed or some checks failed; not merging PR #${PR_NUM}"
-            exit 1
-          fi
-          echo "All checks passed. Squash merging PR #${PR_NUM}"
-          gh pr merge "$PR_NUM" --squash --delete-branch
-          # Issue close は merge イベント発火後に close-issue-on-merge ジョブが処理する
-
-  close-issue-on-merge:
-    # PR が merge されたら、PR body の "Closes #N" から Issue を探して閉じる
-    # GitHub Actions が作成した PR は "Closes #N" の auto-link が効かないため明示的にクローズする
-    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
-    runs-on: ubuntu-latest
-    permissions:
-      issues: write
-      pull-requests: read
-    steps:
-      - name: Close linked issue
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
-        run: |
-          set -e
-          PR_NUM="${{ github.event.pull_request.number }}"
-          # 1) PR body から "Closes #N" を抽出
-          ISSUE_NUM=$(echo "$PR_BODY" | grep -oE 'Closes #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
-          # 2) 見つからない場合、branch 名 claude/issue-<N>-* から抽出 (claude-code-action 生成 PR 対応)
-          if [ -z "$ISSUE_NUM" ]; then
-            ISSUE_NUM=$(echo "$PR_BRANCH" | grep -oE '^claude/issue-[0-9]+' | grep -oE '[0-9]+' || true)
-          fi
-          if [ -n "$ISSUE_NUM" ]; then
-            echo "Closing issue #${ISSUE_NUM} (linked from PR #${PR_NUM}, branch=$PR_BRANCH)"
-            gh issue close "$ISSUE_NUM" --repo "${{ github.repository }}" --comment "Auto-resolved by PR #${PR_NUM}"
-          else
-            echo "No 'Closes #N' in PR body and no claude/issue-<N> branch; skipping issue close"
-          fi
+  claude-code:
+    uses: MNML-LLC/.github/.github/workflows/claude-reusable.yml@main
+    secrets: inherit
