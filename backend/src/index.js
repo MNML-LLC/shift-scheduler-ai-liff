@@ -9,6 +9,8 @@ import {
 import webhookRouter from './routes/webhook.js';
 import notificationRouter from './routes/notification.js';
 import { getNotificationConfig } from './services/lineService.js';
+import { newRunId, logCronRun } from './utils/runLog.js';
+import { notifyCronRun, notifyCronError } from './services/slackService.js';
 
 dotenv.config();
 
@@ -16,6 +18,102 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(express.json());
+
+// ===== Cron可観測性 =====
+
+const config = getNotificationConfig();
+const cronSchedule = config.cronSchedule || '0 9 * * *';
+const tz = config.settings?.timezone || 'Asia/Tokyo';
+
+// 直近のcron実行サマリ（メモリ保持のみ・DB保存なし）
+let lastCronRun = null;
+
+// sendAutoReminder と同じロジックで対象月を算出（reminderService は変更しない）
+function getAutoReminderTarget(now = new Date()) {
+  let targetYear = now.getFullYear();
+  let targetMonth = now.getMonth() + 2; // 来月分
+
+  if (targetMonth > 12) {
+    targetMonth = 1;
+    targetYear++;
+  }
+
+  return { targetYear, targetMonth };
+}
+
+// CronRunSummary を組み立てる（個人情報は含めない: statsは件数のみ）
+function buildCronRunSummary({ runId, firedAt, result, error, startedMs }) {
+  const { targetYear, targetMonth } = getAutoReminderTarget();
+
+  const summary = {
+    event: 'cron_run',
+    runId,
+    firedAt,
+    timezone: tz,
+    targetYear,
+    targetMonth,
+    outcome: 'noop',
+    phase: null,
+    type: null,
+    notified: false,
+    reason: null,
+    stats: null,
+    durationMs: Date.now() - startedMs,
+    error: null,
+  };
+
+  if (error) {
+    summary.outcome = 'error';
+    summary.error = error.message || String(error);
+    return summary;
+  }
+
+  summary.notified = Boolean(result?.notified);
+  summary.phase = result?.phase ?? result?.skippedPhase ?? null;
+  summary.type = result?.type ?? null;
+  summary.reason = result?.reason ?? null;
+
+  if (result?.stats) {
+    summary.stats = {
+      totalCount: result.stats.totalCount,
+      submittedCount: result.stats.submittedCount,
+      unsubmittedCount: result.stats.unsubmittedCount,
+    };
+  }
+
+  if (summary.notified) {
+    summary.outcome = 'sent';
+  } else if (summary.reason === 'No phase matched') {
+    summary.outcome = 'noop';
+  } else {
+    summary.outcome = 'skipped';
+  }
+
+  return summary;
+}
+
+// 自動リマインドを実行し、計測・ログ・Slack通知・lastCronRun 更新を行う
+// （cron と POST /api/send-auto-reminder の両方から呼ばれる）
+async function runObservedAutoReminder() {
+  const runId = newRunId();
+  const firedAt = new Date().toISOString();
+  const startedMs = Date.now();
+
+  try {
+    const result = await sendAutoReminder();
+    const summary = buildCronRunSummary({ runId, firedAt, result, startedMs });
+    lastCronRun = summary;
+    logCronRun(summary);
+    await notifyCronRun(summary);
+    return { summary, result };
+  } catch (error) {
+    const summary = buildCronRunSummary({ runId, firedAt, error, startedMs });
+    lastCronRun = summary;
+    logCronRun(summary);
+    await notifyCronError({ runId, firedAt, error });
+    throw error;
+  }
+}
 
 // ===== ルート設定 =====
 
@@ -30,8 +128,14 @@ app.get('/', (req, res) => {
       notification: '/api/notification/*',
       sendReminder: '/api/send-reminder',
       sendReminderPhase: '/api/send-reminder-phase',
+      cronStatus: '/api/cron-status',
     },
   });
+});
+
+// 直近のcron実行サマリを返す（未発火時は null。個人情報は含めない）
+app.get('/api/cron-status', (req, res) => {
+  res.json({ lastRun: lastCronRun });
 });
 
 // LINE Webhook
@@ -71,7 +175,7 @@ app.post('/api/send-reminder', async (req, res) => {
 // 自動リマインド実行（テスト用）
 app.post('/api/send-auto-reminder', async (req, res) => {
   try {
-    const result = await sendAutoReminder();
+    const { result } = await runObservedAutoReminder();
 
     res.json({
       success: true,
@@ -136,29 +240,29 @@ app.post('/api/send-reminder-phase', async (req, res) => {
 
 // ===== Cronジョブ設定 =====
 
-const config = getNotificationConfig();
-const cronSchedule = config.cronSchedule || '0 9 * * *';
-
 // 毎日定時にリマインド通知をチェック（フェーズ4のみ自動送信、フェーズ1~3は手動）
-cron.schedule(cronSchedule, async () => {
-  console.log('⏰ Cron job triggered at', new Date().toISOString());
+// timezone を渡さないと UTC 基準で発火するため、必ず JST を指定する
+cron.schedule(
+  cronSchedule,
+  async () => {
+    console.log('⏰ Cron job triggered at', new Date().toISOString());
 
-  try {
-    const result = await sendAutoReminder();
-    console.log('✅ Cron job completed:', result);
-  } catch (error) {
-    console.error('❌ Cron job failed:', error);
-  }
-});
+    try {
+      const { summary } = await runObservedAutoReminder();
+      console.log('✅ Cron job completed:', summary.outcome);
+    } catch (error) {
+      console.error('❌ Cron job failed:', error);
+    }
+  },
+  { timezone: tz }
+);
 
 // ===== サーバー起動 =====
 
 app.listen(PORT, () => {
   console.log('===========================================');
   console.log(`🚀 Shift Reminder Service running on port ${PORT}`);
-  console.log(
-    `📅 Cron schedule: ${cronSchedule} (${config.settings.timezone})`
-  );
+  console.log(`📅 Cron schedule: ${cronSchedule} (${tz})`);
   console.log('📋 Cron behavior: Phase 4 only (Phase 1-3 is manual)');
   console.log(
     `📵 Notification enabled: ${process.env.NOTIFICATION_ENABLED !== 'false'}`
@@ -166,6 +270,7 @@ app.listen(PORT, () => {
   console.log('===========================================');
   console.log('Available endpoints:');
   console.log('  GET  /                           - Health check');
+  console.log('  GET  /api/cron-status            - Last cron run summary');
   console.log('  POST /api/webhook/line           - LINE Webhook');
   console.log('  POST /api/notification/first-plan-approved');
   console.log('  POST /api/notification/second-plan-approved');
