@@ -5,6 +5,7 @@ import {
   sendAutoReminder,
   sendShiftReminders,
   sendReminderByPhase,
+  getAutoReminderTarget,
 } from './services/reminderService.js';
 import webhookRouter from './routes/webhook.js';
 import notificationRouter from './routes/notification.js';
@@ -27,19 +28,6 @@ const tz = config.settings?.timezone || 'Asia/Tokyo';
 
 // 直近のcron実行サマリ（メモリ保持のみ・DB保存なし）
 let lastCronRun = null;
-
-// sendAutoReminder と同じロジックで対象月を算出（reminderService は変更しない）
-function getAutoReminderTarget(now = new Date()) {
-  let targetYear = now.getFullYear();
-  let targetMonth = now.getMonth() + 2; // 来月分
-
-  if (targetMonth > 12) {
-    targetMonth = 1;
-    targetYear++;
-  }
-
-  return { targetYear, targetMonth };
-}
 
 // CronRunSummary を組み立てる（個人情報は含めない: statsは件数のみ）
 function buildCronRunSummary({ runId, firedAt, result, error, startedMs }) {
