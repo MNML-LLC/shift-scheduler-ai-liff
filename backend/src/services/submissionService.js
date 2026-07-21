@@ -162,6 +162,85 @@ export async function getPartTimeDeadlineSettings(tenantId) {
 }
 
 /**
+ * 締切設定をDBから取得（雇用形態指定）
+ * @param {number} tenantId - テナントID
+ * @param {string} employmentType - 雇用形態コード（例: 'PART_TIME'）
+ * @returns {Promise<Object|null>} 締切設定（未設定時はnull）
+ */
+export async function getDeadlineSettings(tenantId, employmentType) {
+  const query = `
+    SELECT tenant_id, employment_type, deadline_day, deadline_time, is_enabled
+    FROM core.shift_deadline_settings
+    WHERE tenant_id = $1 AND employment_type = $2
+  `;
+
+  const result = await pool.query(query, [tenantId, employmentType]);
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  return result.rows[0];
+}
+
+/**
+ * 締切設定を UPSERT（管理者API用）
+ * @param {Object} settings - 締切設定
+ * @param {number} settings.tenantId - テナントID
+ * @param {string} settings.employmentType - 雇用形態コード（例: 'PART_TIME'）
+ * @param {number} settings.deadlineDay - 締切日（1-31）
+ * @param {string} settings.deadlineTime - 締切時刻（"HH:MM"形式）
+ * @param {boolean} [settings.isEnabled] - 有効フラグ（省略時は既存値を維持、新規はtrue）
+ * @returns {Promise<Object>} 更新後の締切設定
+ */
+export async function upsertDeadlineSettings({
+  tenantId,
+  employmentType,
+  deadlineDay,
+  deadlineTime,
+  isEnabled,
+}) {
+  // ON CONFLICT はユニーク制約に依存するため、UPDATE → INSERT の順で実行
+  const updateQuery = `
+    UPDATE core.shift_deadline_settings
+    SET deadline_day = $3,
+        deadline_time = $4,
+        is_enabled = COALESCE($5, is_enabled)
+    WHERE tenant_id = $1 AND employment_type = $2
+    RETURNING tenant_id, employment_type, deadline_day, deadline_time, is_enabled
+  `;
+
+  const updateResult = await pool.query(updateQuery, [
+    tenantId,
+    employmentType,
+    deadlineDay,
+    deadlineTime,
+    isEnabled ?? null,
+  ]);
+
+  if (updateResult.rows.length > 0) {
+    return updateResult.rows[0];
+  }
+
+  const insertQuery = `
+    INSERT INTO core.shift_deadline_settings
+      (tenant_id, employment_type, deadline_day, deadline_time, is_enabled)
+    VALUES ($1, $2, $3, $4, COALESCE($5, true))
+    RETURNING tenant_id, employment_type, deadline_day, deadline_time, is_enabled
+  `;
+
+  const insertResult = await pool.query(insertQuery, [
+    tenantId,
+    employmentType,
+    deadlineDay,
+    deadlineTime,
+    isEnabled ?? null,
+  ]);
+
+  return insertResult.rows[0];
+}
+
+/**
  * 全アルバイトスタッフを取得（LINE User ID付き）
  * @param {number} tenantId - テナントID
  * @returns {Promise<Array>} スタッフの配列

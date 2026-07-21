@@ -161,6 +161,39 @@ https://liff.line.me/2008227932-Rq9rJrJn
 
 ---
 
+## 段階的リマインド（フェーズ1〜4）
+
+### フェーズ構成
+
+`backend/src/config/line-notification.json` の `reminders` で定義:
+
+| フェーズ | タイミング | 内容                     |
+| -------- | ---------- | ------------------------ |
+| 1        | 締切7日前  | 匿名リマインド           |
+| 2        | 締切3日前  | 提出状況（統計付き）     |
+| 3        | 締切1日前  | 未提出者名入りリマインド |
+| 4        | 締切当日   | 締切通知                 |
+
+### cron 自動送信
+
+cron は毎日発火し、DB（`core.shift_deadline_settings`）から締切設定を再取得して
+残り日数を計算し、該当フェーズがあれば自動送信する。
+締め切り日を API で変更すると、次回 cron 発火時に自動で反映される。
+
+**フェーズ別 ON/OFF:** 環境変数 `AUTO_REMIND_PHASES`（カンマ区切り）で制御。
+
+```bash
+# 全フェーズ自動送信（デフォルト、未設定時と同じ）
+AUTO_REMIND_PHASES=1,2,3,4
+
+# フェーズ4のみ自動送信（旧動作）
+AUTO_REMIND_PHASES=4
+```
+
+無効化されたフェーズは `POST /api/send-reminder-phase` で手動送信できる。
+
+---
+
 ## API エンドポイント
 
 ### ヘルスチェック
@@ -221,6 +254,50 @@ Content-Type: application/json
 
 **コード位置:** `backend/src/index.js` 行20-45
 
+### 自動リマインド実行（対象月指定可）
+
+```
+POST /api/send-auto-reminder
+Content-Type: application/json
+
+{
+  "year": 2026,
+  "month": 8
+}
+```
+
+`year` / `month` を省略すると来月分を対象にする。締切が当月内にある場合など、
+対象月を明示したいときに指定する。
+
+### 締め切り設定の取得・変更（管理者向け）
+
+Basic 認証が必要（環境変数 `ADMIN_BASIC_USER` / `ADMIN_BASIC_PASS`）。
+未設定の場合、これらのエンドポイントは 503 を返す。
+
+```
+GET /api/liff/deadline-settings?tenant_id=3&employment_type=PART_TIME
+Authorization: Basic <base64(user:pass)>
+```
+
+```
+PUT /api/liff/deadline-settings
+Authorization: Basic <base64(user:pass)>
+Content-Type: application/json
+
+{
+  "tenant_id": 3,
+  "employment_type": "PART_TIME",
+  "deadline_day": 10,
+  "deadline_time": "23:59",
+  "is_enabled": true
+}
+```
+
+- `core.shift_deadline_settings` を UPSERT する（`is_enabled` は任意）
+- 変更した締め切り日は次回 cron 発火時に反映される（cron が毎回DBから再取得）
+
+**コード位置:** `backend/src/routes/deadlineSettings.js`
+
 ---
 
 ## 環境変数
@@ -241,6 +318,17 @@ LIFF_ID=2008227932-Rq9rJrJn
 TENANT_ID=3
 NODE_ENV=production
 PORT=3001
+```
+
+### 任意
+
+```bash
+# cron で自動送信するフェーズ（カンマ区切り、未設定時は全フェーズ 1,2,3,4）
+AUTO_REMIND_PHASES=1,2,3,4
+
+# 管理者API（締め切り設定変更）の Basic 認証情報（未設定時は管理者API無効）
+ADMIN_BASIC_USER=admin
+ADMIN_BASIC_PASS=change_me
 ```
 
 **設定場所:**
@@ -411,8 +499,9 @@ cron.schedule('0 9 3,7 * *', () => { ... })
 
 ### アクセス制御
 
-- データベースは読み取り専用
-- 書き込み処理なし（安全性重視）
+- リマインド送信系はデータベース読み取りのみ
+- 書き込みは `core.shift_deadline_settings` の UPSERT（管理者API経由）のみ
+- 管理者APIは Basic 認証必須（`ADMIN_BASIC_USER` / `ADMIN_BASIC_PASS`）
 
 ### エラーハンドリング
 
