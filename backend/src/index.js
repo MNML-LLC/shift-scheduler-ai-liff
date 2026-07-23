@@ -6,9 +6,11 @@ import {
   sendShiftReminders,
   sendReminderByPhase,
   getAutoReminderTarget,
+  getAutoRemindPhases,
 } from './services/reminderService.js';
 import webhookRouter from './routes/webhook.js';
 import notificationRouter from './routes/notification.js';
+import deadlineSettingsRouter from './routes/deadlineSettings.js';
 import { getNotificationConfig } from './services/lineService.js';
 import { newRunId, logCronRun } from './utils/runLog.js';
 import { notifyCronRun, notifyCronError } from './services/slackService.js';
@@ -30,9 +32,15 @@ const tz = config.settings?.timezone || 'Asia/Tokyo';
 let lastCronRun = null;
 
 // CronRunSummary を組み立てる（個人情報は含めない: statsは件数のみ）
-function buildCronRunSummary({ runId, firedAt, result, error, startedMs }) {
-  const { targetYear, targetMonth } = getAutoReminderTarget();
-
+function buildCronRunSummary({
+  runId,
+  firedAt,
+  result,
+  error,
+  startedMs,
+  targetYear,
+  targetMonth,
+}) {
   const summary = {
     event: 'cron_run',
     runId,
@@ -82,20 +90,41 @@ function buildCronRunSummary({ runId, firedAt, result, error, startedMs }) {
 
 // 自動リマインドを実行し、計測・ログ・Slack通知・lastCronRun 更新を行う
 // （cron と POST /api/send-auto-reminder の両方から呼ばれる）
-async function runObservedAutoReminder() {
+// year/month 省略時は getAutoReminderTarget()（来月分）を対象にする
+async function runObservedAutoReminder({ year, month } = {}) {
   const runId = newRunId();
   const firedAt = new Date().toISOString();
   const startedMs = Date.now();
 
+  // 実送信とサマリで同じ対象月を使う（明示指定があればそれを優先）
+  const { targetYear, targetMonth } =
+    year && month
+      ? { targetYear: year, targetMonth: month }
+      : getAutoReminderTarget();
+
   try {
-    const result = await sendAutoReminder();
-    const summary = buildCronRunSummary({ runId, firedAt, result, startedMs });
+    const result = await sendAutoReminder(targetYear, targetMonth);
+    const summary = buildCronRunSummary({
+      runId,
+      firedAt,
+      result,
+      startedMs,
+      targetYear,
+      targetMonth,
+    });
     lastCronRun = summary;
     logCronRun(summary);
     await notifyCronRun(summary);
     return { summary, result };
   } catch (error) {
-    const summary = buildCronRunSummary({ runId, firedAt, error, startedMs });
+    const summary = buildCronRunSummary({
+      runId,
+      firedAt,
+      error,
+      startedMs,
+      targetYear,
+      targetMonth,
+    });
     lastCronRun = summary;
     logCronRun(summary);
     await notifyCronError({ runId, firedAt, error });
@@ -117,6 +146,7 @@ app.get('/', (req, res) => {
       sendReminder: '/api/send-reminder',
       sendReminderPhase: '/api/send-reminder-phase',
       cronStatus: '/api/cron-status',
+      deadlineSettings: '/api/liff/deadline-settings',
     },
   });
 });
@@ -131,6 +161,9 @@ app.use('/api/webhook', webhookRouter);
 
 // 通知API（第1案・第2案承認通知）
 app.use('/api/notification', notificationRouter);
+
+// 締め切り設定API（管理者向け、Basic Auth）
+app.use('/api/liff', deadlineSettingsRouter);
 
 // 手動でリマインダーを送信するエンドポイント（テスト用）
 app.post('/api/send-reminder', async (req, res) => {
@@ -161,9 +194,19 @@ app.post('/api/send-reminder', async (req, res) => {
 });
 
 // 自動リマインド実行（テスト用）
+// year/month を指定すると対象月を明示できる（省略時は来月分）
 app.post('/api/send-auto-reminder', async (req, res) => {
   try {
-    const { result } = await runObservedAutoReminder();
+    const { year, month } = req.body || {};
+
+    if ((year && !month) || (!year && month)) {
+      return res.status(400).json({
+        success: false,
+        error: 'year and month must be specified together (or both omitted)',
+      });
+    }
+
+    const { result } = await runObservedAutoReminder({ year, month });
 
     res.json({
       success: true,
@@ -228,7 +271,8 @@ app.post('/api/send-reminder-phase', async (req, res) => {
 
 // ===== Cronジョブ設定 =====
 
-// 毎日定時にリマインド通知をチェック（フェーズ4のみ自動送信、フェーズ1~3は手動）
+// 毎日定時にリマインド通知をチェック
+// AUTO_REMIND_PHASES で有効化されたフェーズ（デフォルト: 1,2,3,4）を自動送信
 // timezone を渡さないと UTC 基準で発火するため、必ず JST を指定する
 cron.schedule(
   cronSchedule,
@@ -251,7 +295,9 @@ app.listen(PORT, () => {
   console.log('===========================================');
   console.log(`🚀 Shift Reminder Service running on port ${PORT}`);
   console.log(`📅 Cron schedule: ${cronSchedule} (${tz})`);
-  console.log('📋 Cron behavior: Phase 4 only (Phase 1-3 is manual)');
+  console.log(
+    `📋 Cron behavior: auto-send phases [${getAutoRemindPhases().join(', ')}] (AUTO_REMIND_PHASES)`
+  );
   console.log(
     `📵 Notification enabled: ${process.env.NOTIFICATION_ENABLED !== 'false'}`
   );
@@ -269,6 +315,12 @@ app.listen(PORT, () => {
   console.log('  POST /api/send-auto-reminder     - Auto reminder');
   console.log(
     '  POST /api/send-reminder-phase    - Manual reminder (phase 1-4)'
+  );
+  console.log(
+    '  GET  /api/liff/deadline-settings - Get deadline settings (admin)'
+  );
+  console.log(
+    '  PUT  /api/liff/deadline-settings - Update deadline settings (admin)'
   );
   console.log('===========================================');
 });

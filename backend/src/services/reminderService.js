@@ -114,6 +114,20 @@ export function determinePhase(daysUntilDeadline) {
 }
 
 /**
+ * cron で自動送信を許可するフェーズ一覧を取得
+ * 環境変数 AUTO_REMIND_PHASES（カンマ区切り、例: "1,2,3,4"）で制御。
+ * 未設定時は全フェーズ（1〜4）を自動送信する。
+ * @returns {number[]} 自動送信が有効なフェーズ番号の配列
+ */
+export function getAutoRemindPhases() {
+  const raw = process.env.AUTO_REMIND_PHASES || '1,2,3,4';
+  return raw
+    .split(',')
+    .map(s => parseInt(s.trim(), 10))
+    .filter(n => Number.isInteger(n) && n >= 1 && n <= 4);
+}
+
+/**
  * リマインド通知を送信（cron から呼び出される）
  * @param {number} year - 対象年
  * @param {number} month - 対象月
@@ -145,15 +159,16 @@ export async function sendReminderNotification(year, month) {
     return { success: true, notified: false, reason: 'No phase matched' };
   }
 
-  // フェーズ1~3は自動送信しない（手動APIのみ）
-  if (phase.phase >= 1 && phase.phase <= 3) {
+  // AUTO_REMIND_PHASES で無効化されているフェーズはスキップ
+  const autoRemindPhases = getAutoRemindPhases();
+  if (!autoRemindPhases.includes(phase.phase)) {
     console.log(
-      `📭 Phase ${phase.phase} skipped (manual only via /api/send-reminder-phase)`
+      `📭 Phase ${phase.phase} skipped (disabled by AUTO_REMIND_PHASES=${autoRemindPhases.join(',')}; manual send via /api/send-reminder-phase)`
     );
     return {
       success: true,
       notified: false,
-      reason: 'Phase 1-3 is manual only',
+      reason: `Phase ${phase.phase} is disabled by AUTO_REMIND_PHASES`,
       skippedPhase: phase.phase,
     };
   }
@@ -226,9 +241,16 @@ export function getAutoReminderTarget(now = new Date()) {
 /**
  * 対象月を自動計算してリマインドを送信
  * cronジョブから呼び出される場合に使用
+ * @param {number} [year] - 対象年（省略時は自動計算）
+ * @param {number} [month] - 対象月（省略時は来月）
  */
-export async function sendAutoReminder() {
-  const { targetYear, targetMonth } = getAutoReminderTarget();
+export async function sendAutoReminder(year, month) {
+  let targetYear = year;
+  let targetMonth = month;
+
+  if (!targetYear || !targetMonth) {
+    ({ targetYear, targetMonth } = getAutoReminderTarget());
+  }
 
   console.log(`🤖 Auto reminder: targeting ${targetYear}/${targetMonth}`);
 
