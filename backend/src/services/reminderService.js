@@ -222,6 +222,23 @@ export async function sendReminderNotification(year, month) {
 }
 
 /**
+ * 自動リマインドの対象月（来月分）を算出
+ * @param {Date} now - 基準日時（省略時は現在時刻）
+ * @returns {{targetYear: number, targetMonth: number}} 対象年月
+ */
+export function getAutoReminderTarget(now = new Date()) {
+  let targetYear = now.getFullYear();
+  let targetMonth = now.getMonth() + 2; // 来月分
+
+  if (targetMonth > 12) {
+    targetMonth = 1;
+    targetYear++;
+  }
+
+  return { targetYear, targetMonth };
+}
+
+/**
  * 対象月を自動計算してリマインドを送信
  * cronジョブから呼び出される場合に使用
  * @param {number} [year] - 対象年（省略時は自動計算）
@@ -232,16 +249,7 @@ export async function sendAutoReminder(year, month) {
   let targetMonth = month;
 
   if (!targetYear || !targetMonth) {
-    const now = new Date();
-
-    // 現在の日付から対象月を判定（来月分のシフト）
-    targetYear = now.getFullYear();
-    targetMonth = now.getMonth() + 2; // 来月分
-
-    if (targetMonth > 12) {
-      targetMonth = 1;
-      targetYear++;
-    }
+    ({ targetYear, targetMonth } = getAutoReminderTarget());
   }
 
   console.log(`🤖 Auto reminder: targeting ${targetYear}/${targetMonth}`);
