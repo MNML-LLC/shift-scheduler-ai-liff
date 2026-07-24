@@ -67,6 +67,7 @@ npm run dev
 - ビルドコマンド: `npm install`
 - 起動コマンド: `npm start`
 - URL: https://shift-scheduler-ai-liff-production.up.railway.app
+- 監視: GitHub Actions による日次ヘルスチェック（毎日 JST 09:00・異常時のみ Slack 通知）。詳細は [ヘルスチェック仕様](docs/HEALTHCHECK.md) を参照
 
 ## ドキュメント
 
@@ -75,6 +76,7 @@ npm run dev
 - [システムアーキテクチャ](docs/ARCHITECTURE.md)
 - [LIFF機能仕様](docs/LIFF_FEATURES.md)
 - [リマインダーシステム仕様](docs/REMINDER_SYSTEM.md)
+- [ヘルスチェック仕様](docs/HEALTHCHECK.md)
 
 ## 技術スタック
 
