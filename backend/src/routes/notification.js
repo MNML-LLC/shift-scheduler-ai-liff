@@ -2,12 +2,14 @@ import express from 'express';
 import {
   getGroupIdByTenant,
   sendGroupMessage,
+  sendIndividualMessage,
   formatMessage,
   getLiffUrl,
   getNotificationConfig,
 } from '../services/lineService.js';
 import { getDeadlineString } from '../services/reminderService.js';
 import { getPartTimeDeadlineSettings } from '../services/submissionService.js';
+import pool from '../config/database.js';
 
 const router = express.Router();
 
@@ -47,6 +49,27 @@ setInterval(() => {
     }
   }
 }, DUPLICATE_WINDOW_MS * 2);
+
+/**
+ * シフト確定通知のメッセージ本文を組み立てる
+ * @param {string} name - スタッフ名
+ * @param {number} year - 年
+ * @param {number} month - 月
+ * @param {Array<{shift_date: string|Date, start_time: string, end_time: string}>} shifts - シフトの配列
+ * @returns {string} 通知メッセージ
+ */
+function buildShiftMessage(name, year, month, shifts) {
+  const header = `${name}さんの${year}年${month}月のシフトが確定しました。\n`;
+  const lines = shifts.map(({ shift_date, start_time, end_time }) => {
+    const dateStr =
+      typeof shift_date === 'string'
+        ? shift_date.slice(0, 10)
+        : shift_date.toISOString().slice(0, 10);
+    const [, mm, dd] = dateStr.split('-');
+    return `${parseInt(mm)}/${parseInt(dd)} ${start_time.slice(0, 5)}〜${end_time.slice(0, 5)}`;
+  });
+  return header + lines.join('\n');
+}
 
 /**
  * 第1案承認通知
@@ -244,6 +267,117 @@ router.post('/test', async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error in test notification:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * シフト確定通知（全スタッフへの個別LINE通知）
+ * POST /api/notification/shift-confirmed
+ *
+ * shift-scheduler-ai から呼び出される
+ * 対象テナント・店舗の LINE 連携済みスタッフ全員に、個人シフト情報を個別送信する
+ */
+router.post('/shift-confirmed', async (req, res) => {
+  try {
+    const { tenant_id, store_id, plan_id, year, month } = req.body;
+
+    console.log('📢 Shift confirmed notification request:', {
+      tenant_id,
+      store_id,
+      plan_id,
+      year,
+      month,
+    });
+
+    if (!tenant_id || !store_id || !plan_id || !year || !month) {
+      return res.status(400).json({
+        success: false,
+        error:
+          'Missing required parameters: tenant_id, store_id, plan_id, year, month',
+      });
+    }
+
+    const dedupeKey = `shift_confirmed_${tenant_id}_${store_id}_${year}_${month}`;
+    if (isDuplicateNotification(dedupeKey)) {
+      return res.json({
+        success: true,
+        message: 'Duplicate notification skipped',
+        notified: false,
+        skipped: true,
+      });
+    }
+
+    const query = `
+      SELECT
+        s.staff_id,
+        s.name,
+        sla.line_user_id,
+        sh.shift_date,
+        sh.start_time,
+        sh.end_time
+      FROM hr.staff s
+      JOIN hr.staff_line_accounts sla
+        ON s.staff_id = sla.staff_id
+        AND s.tenant_id = sla.tenant_id
+        AND sla.is_active = true
+      JOIN ops.shifts sh
+        ON sh.staff_id = s.staff_id
+        AND sh.tenant_id = s.tenant_id
+        AND sh.plan_id = $3
+      WHERE s.tenant_id = $1
+        AND s.store_id = $2
+        AND s.is_active = true
+      ORDER BY s.staff_id, sh.shift_date
+    `;
+
+    const result = await pool.query(query, [tenant_id, store_id, plan_id]);
+
+    const staffShifts = new Map();
+    for (const row of result.rows) {
+      if (!staffShifts.has(row.staff_id)) {
+        staffShifts.set(row.staff_id, {
+          name: row.name,
+          line_user_id: row.line_user_id,
+          shifts: [],
+        });
+      }
+      staffShifts.get(row.staff_id).shifts.push({
+        shift_date: row.shift_date,
+        start_time: row.start_time,
+        end_time: row.end_time,
+      });
+    }
+
+    let sent = 0;
+    let errors = 0;
+    for (const [staffId, { name, line_user_id, shifts }] of staffShifts) {
+      const message = buildShiftMessage(name, year, month, shifts);
+      const ok = await sendIndividualMessage(line_user_id, message);
+      if (ok) {
+        sent++;
+      } else {
+        errors++;
+        console.error(`Failed to send to staff ${staffId}`);
+      }
+    }
+
+    const total = staffShifts.size;
+    console.log(
+      `shift-confirmed: sent=${sent}, errors=${errors}, total=${total}`
+    );
+    res.json({
+      success: true,
+      message: `Notifications sent: ${sent}/${total}`,
+      sent,
+      errors,
+      total,
+    });
+  } catch (error) {
+    console.error('❌ Error in shift-confirmed:', error);
     res.status(500).json({
       success: false,
       error: error.message,
