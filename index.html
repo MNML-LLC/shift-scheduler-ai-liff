@@ -613,15 +613,17 @@
           periodMonth = 12;
         }
 
+        // 対象月の月末日で日付を丸める（例: 2月31日 → 2月28日）
+        // periodMonth は 1〜12。new Date(year, periodMonth, 0) は periodMonth の月末日を返す
+        const lastDay = new Date(periodYear, periodMonth, 0).getDate();
+        const periodMonthStr = String(periodMonth).padStart(2, '0');
+
         // start_dayがNULLでない場合のみ開始日チェック
         if (setting.start_day !== null && setting.start_day !== undefined) {
+          const clampedStartDay = Math.min(setting.start_day, lastDay);
+          // JST基準で開始日時を構築（デバイスのローカルタイムゾーン非依存）
           const startDate = new Date(
-            periodYear,
-            periodMonth - 1,
-            setting.start_day,
-            0,
-            0,
-            0
+            `${periodYear}-${periodMonthStr}-${String(clampedStartDay).padStart(2, '0')}T00:00:00+09:00`
           );
 
           // まだ入力期間前
@@ -632,14 +634,12 @@
 
         // 締切日チェック
         // deadline_time を "HH:MM" 形式からパース
+        const clampedDeadlineDay = Math.min(setting.deadline_day, lastDay);
         const [hour, minute] = setting.deadline_time.split(':').map(Number);
+        const deadlineTimeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+        // JST基準で締切日時を構築（デバイスのローカルタイムゾーン非依存）
         const endDate = new Date(
-          periodYear,
-          periodMonth - 1,
-          setting.deadline_day,
-          hour,
-          minute,
-          59
+          `${periodYear}-${periodMonthStr}-${String(clampedDeadlineDay).padStart(2, '0')}T${deadlineTimeStr}:59+09:00`
         );
 
         return now > endDate;
