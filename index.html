@@ -294,6 +294,33 @@
         border-color: var(--green);
         color: var(--green-strong);
       }
+      .deadline-banner {
+        padding: 8px;
+        margin-top: 8px;
+        border-radius: 8px;
+        font-size: 14px;
+        line-height: 1.5;
+        background: var(--amber-weak);
+        color: #7c2d12;
+      }
+      .deadline-banner.ok {
+        background: var(--amber-weak);
+        color: #7c2d12;
+      }
+      .deadline-banner.warning {
+        background: #fed7aa;
+        color: #7c2d12;
+      }
+      .deadline-banner.today {
+        background: #fdba74;
+        color: #7c2d12;
+        font-weight: 700;
+      }
+      .deadline-banner.overdue {
+        background: var(--red-weak);
+        color: #7f1d1d;
+        font-weight: 700;
+      }
     </style>
   </head>
   <body>
@@ -356,16 +383,7 @@
         >
           スタッフを選択すると、雇用形態に応じて自動設定されます
         </div>
-        <div
-          id="deadlineInfo"
-          style="
-            padding: 8px;
-            margin-top: 8px;
-            background: #fff3cd;
-            border-radius: 8px;
-            display: none;
-          "
-        >
+        <div id="deadlineInfo" class="deadline-banner" style="display: none">
           <!-- 締切情報がここに表示されます -->
         </div>
       </div>
@@ -624,6 +642,79 @@
 
       // ====== 締切判定 ======
       /**
+       * 対象年月の締切日時（JST）を Date オブジェクトで返す
+       * @param {number} year - 対象年
+       * @param {number} month - 対象月 (1-12)
+       * @param {string} employmentType - 雇用形態 ('FULL_TIME', 'PART_TIME')
+       * @returns {Date|null} 締切日時。設定が無効・未設定なら null
+       */
+      function getDeadlineDate(year, month, employmentType) {
+        if (!employmentType) {
+          employmentType = 'PART_TIME';
+        }
+        const setting = deadlineSettingsMap.get(employmentType);
+        if (!setting || !setting.is_enabled) {
+          return null;
+        }
+
+        let periodYear = year;
+        let periodMonth = month - 1;
+        // 1月の場合は前年12月が締切月
+        if (periodMonth === 0) {
+          periodYear--;
+          periodMonth = 12;
+        }
+
+        // 対象月の月末日で日付を丸める（例: 2月31日 → 2月28日）
+        const lastDay = new Date(periodYear, periodMonth, 0).getDate();
+        const periodMonthStr = String(periodMonth).padStart(2, '0');
+        const clampedDeadlineDay = Math.min(setting.deadline_day, lastDay);
+        const [hour, minute] = setting.deadline_time.split(':').map(Number);
+        const deadlineTimeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+        // JST基準で締切日時を構築（デバイスのローカルタイムゾーン非依存）
+        return new Date(
+          `${periodYear}-${periodMonthStr}-${String(clampedDeadlineDay).padStart(2, '0')}T${deadlineTimeStr}:59+09:00`
+        );
+      }
+
+      /**
+       * 締切までのカウントダウン状態を返す
+       * @param {number} year - 対象年
+       * @param {number} month - 対象月 (1-12)
+       * @param {string} employmentType - 雇用形態
+       * @returns {{state: 'ok'|'warning'|'today'|'overdue', daysLeft: number, deadlineDate: Date}|null}
+       *   締切設定が無い場合は null
+       */
+      function getDeadlineCountdown(year, month, employmentType) {
+        const deadlineDate = getDeadlineDate(year, month, employmentType);
+        if (!deadlineDate) return null;
+
+        const now = new Date();
+        if (now > deadlineDate) {
+          return { state: 'overdue', daysLeft: 0, deadlineDate };
+        }
+
+        // JST 基準の 0:00 を作って暦日単位で残日数を求める
+        const toJstMidnight = d => {
+          const jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+          const y = jst.getUTCFullYear();
+          const mo = String(jst.getUTCMonth() + 1).padStart(2, '0');
+          const day = String(jst.getUTCDate()).padStart(2, '0');
+          return new Date(`${y}-${mo}-${day}T00:00:00+09:00`);
+        };
+        const daysLeft = Math.round(
+          (toJstMidnight(deadlineDate) - toJstMidnight(now)) /
+            (24 * 60 * 60 * 1000)
+        );
+
+        let state;
+        if (daysLeft === 0) state = 'today';
+        else if (daysLeft <= 3) state = 'warning';
+        else state = 'ok';
+        return { state, daysLeft, deadlineDate };
+      }
+
+      /**
        * N月のシフト希望入力締切をチェック（雇用形態別）
        * @param {number} year - 対象年
        * @param {number} month - 対象月 (1-12)
@@ -649,23 +740,16 @@
           return false;
         }
 
-        const now = new Date();
-        let periodYear = year;
-        let periodMonth = month - 1;
-
-        // 1月の場合は前年12月が締切月
-        if (periodMonth === 0) {
-          periodYear--;
-          periodMonth = 12;
-        }
-
-        // 対象月の月末日で日付を丸める（例: 2月31日 → 2月28日）
-        // periodMonth は 1〜12。new Date(year, periodMonth, 0) は periodMonth の月末日を返す
-        const lastDay = new Date(periodYear, periodMonth, 0).getDate();
-        const periodMonthStr = String(periodMonth).padStart(2, '0');
-
         // start_dayがNULLでない場合のみ開始日チェック
         if (setting.start_day !== null && setting.start_day !== undefined) {
+          let periodYear = year;
+          let periodMonth = month - 1;
+          if (periodMonth === 0) {
+            periodYear--;
+            periodMonth = 12;
+          }
+          const lastDay = new Date(periodYear, periodMonth, 0).getDate();
+          const periodMonthStr = String(periodMonth).padStart(2, '0');
           const clampedStartDay = Math.min(setting.start_day, lastDay);
           // JST基準で開始日時を構築（デバイスのローカルタイムゾーン非依存）
           const startDate = new Date(
@@ -673,22 +757,16 @@
           );
 
           // まだ入力期間前
-          if (now < startDate) {
+          if (new Date() < startDate) {
             return true;
           }
         }
 
-        // 締切日チェック
-        // deadline_time を "HH:MM" 形式からパース
-        const clampedDeadlineDay = Math.min(setting.deadline_day, lastDay);
-        const [hour, minute] = setting.deadline_time.split(':').map(Number);
-        const deadlineTimeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-        // JST基準で締切日時を構築（デバイスのローカルタイムゾーン非依存）
-        const endDate = new Date(
-          `${periodYear}-${periodMonthStr}-${String(clampedDeadlineDay).padStart(2, '0')}T${deadlineTimeStr}:59+09:00`
-        );
-
-        return now > endDate;
+        const endDate = getDeadlineDate(year, month, employmentType);
+        if (!endDate) {
+          return false;
+        }
+        return new Date() > endDate;
       }
 
       // ====== スタッフと店舗データ読み込み ======
@@ -1887,6 +1965,20 @@
         const year = cur.getFullYear();
         const month = cur.getMonth() + 1;
 
+        // JST での "HH:MM" フォーマット
+        const formatJstHm = d => {
+          const jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+          return `${String(jst.getUTCHours()).padStart(2, '0')}:${String(jst.getUTCMinutes()).padStart(2, '0')}`;
+        };
+        // JST での "YYYY/M/D HH:MM" フォーマット
+        const formatJstFull = d => {
+          const jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+          const y = jst.getUTCFullYear();
+          const mo = jst.getUTCMonth() + 1;
+          const day = jst.getUTCDate();
+          return `${y}/${mo}/${day} ${formatJstHm(d)}`;
+        };
+
         // 1. 締切チェック（最優先）
         if (ENABLE_DEADLINE_CHECK) {
           const isPastDeadline = isDeadlinePassed(
@@ -1896,14 +1988,26 @@
           );
 
           if (isPastDeadline) {
-            const prevMonth = month === 1 ? 12 : month - 1;
-            const prevYear = month === 1 ? year - 1 : year;
-            const setting = deadlineSettingsMap.get(getEmploymentType());
-            const deadlineDay = setting?.deadline_day || 10;
-            const deadlineTime = setting?.deadline_time || '12:00';
-            deadlineInfo.innerHTML = `⚠️ <strong>${year}年${month}月のシフト希望入力期限は${prevYear}年${prevMonth}月${deadlineDay}日${deadlineTime}で終了しました</strong><br>既存の希望は閲覧できますが、編集・新規登録はできません。`;
+            const countdown = getDeadlineCountdown(
+              year,
+              month,
+              getEmploymentType()
+            );
+            if (countdown && countdown.state === 'overdue') {
+              // 締切超過
+              deadlineInfo.className = 'deadline-banner overdue';
+              deadlineInfo.innerHTML = `⚠️ <strong>締め切りが過ぎています（${formatJstFull(countdown.deadlineDate)}）</strong><br>既存の希望は閲覧できますが、編集・新規登録はできません。`;
+            } else {
+              // まだ開始日前（既存挙動を維持）
+              const prevMonth = month === 1 ? 12 : month - 1;
+              const prevYear = month === 1 ? year - 1 : year;
+              const setting = deadlineSettingsMap.get(getEmploymentType());
+              const deadlineDay = setting?.deadline_day || 10;
+              const deadlineTime = setting?.deadline_time || '12:00';
+              deadlineInfo.className = 'deadline-banner ok';
+              deadlineInfo.innerHTML = `⚠️ <strong>${year}年${month}月のシフト希望入力期限は${prevYear}年${prevMonth}月${deadlineDay}日${deadlineTime}で終了しました</strong><br>既存の希望は閲覧できますが、編集・新規登録はできません。`;
+            }
             deadlineInfo.style.display = 'block';
-            deadlineInfo.style.background = '#fff3cd';
             document.getElementById('submitBtn').disabled = true;
             tip.innerHTML = '入力期限が過ぎています';
             block.style.display = 'none';
@@ -1913,9 +2017,9 @@
 
         // 2. 第1案の存在チェック（アルバイトの場合）
         if (role === 'part' && !firstPlanExists) {
+          deadlineInfo.className = 'deadline-banner overdue';
           deadlineInfo.innerHTML = `⏳ <strong>現在シフトの入力が開始していません</strong>`;
           deadlineInfo.style.display = 'block';
-          deadlineInfo.style.background = '#fee2e2';
           document.getElementById('submitBtn').disabled = true;
           tip.innerHTML = 'シフト入力開始をお待ちください';
           block.style.display = 'none';
@@ -1926,9 +2030,9 @@
         if (role === 'emp') {
           if (!firstPlanExistsForEmp) {
             // パターン1: 第1案が未作成
+            deadlineInfo.className = 'deadline-banner overdue';
             deadlineInfo.innerHTML = `⏳ <strong>現在シフトの入力が開始していません</strong>`;
             deadlineInfo.style.display = 'block';
-            deadlineInfo.style.background = '#fee2e2';
             document.getElementById('submitBtn').disabled = true;
             tip.innerHTML = 'シフト入力開始をお待ちください';
             block.style.display = 'none';
@@ -1936,9 +2040,9 @@
           }
           // else if (firstPlanWorkDays.length === 0) {
           //   // パターン2: 第1案はあるがシフトなし
+          //   deadlineInfo.className = 'deadline-banner ok';
           //   deadlineInfo.innerHTML = `ℹ️ <strong>${year}年${month}月の第1案にあなたの出勤予定がありません</strong><br>出勤予定が登録されるまでお待ちください。`;
           //   deadlineInfo.style.display = 'block';
-          //   deadlineInfo.style.background = '#e3f2fd';
           //   document.getElementById('submitBtn').disabled = true;
           //   tip.innerHTML = '出勤予定の登録をお待ちください';
           //   block.style.display = 'none';
@@ -1947,15 +2051,32 @@
           // パターン3: 通常（休み選択可能）→ 下の処理に進む
         }
 
-        // 3. 締切前かつ第1案あり → 通常表示
-        deadlineInfo.style.background = '#fff3cd';
+        // 3. 締切前かつ第1案あり → カウントダウン表示
         if (ENABLE_DEADLINE_CHECK) {
-          const prevMonth = month === 1 ? 12 : month - 1;
-          const prevYear = month === 1 ? year - 1 : year;
-          const setting = deadlineSettingsMap.get(getEmploymentType());
-          const deadlineDay = setting?.deadline_day || 10;
-          const deadlineTime = setting?.deadline_time || '12:00';
-          deadlineInfo.innerHTML = `📅 ${year}年${month}月のシフト希望入力期限: ${prevYear}年${prevMonth}月${deadlineDay}日${deadlineTime}まで`;
+          const countdown = getDeadlineCountdown(
+            year,
+            month,
+            getEmploymentType()
+          );
+          if (countdown) {
+            if (countdown.state === 'today') {
+              deadlineInfo.className = 'deadline-banner today';
+              deadlineInfo.innerHTML = `⏰ <strong>本日締め切りです（${formatJstHm(countdown.deadlineDate)}まで）</strong>`;
+            } else {
+              deadlineInfo.className = `deadline-banner ${countdown.state}`;
+              const icon = countdown.state === 'warning' ? '⚠️' : '📅';
+              deadlineInfo.innerHTML = `${icon} シフト希望締め切りまで残り <strong>${countdown.daysLeft}</strong> 日`;
+            }
+          } else {
+            // 締切設定なし → 従来のフォールバック表示
+            const prevMonth = month === 1 ? 12 : month - 1;
+            const prevYear = month === 1 ? year - 1 : year;
+            const setting = deadlineSettingsMap.get(getEmploymentType());
+            const deadlineDay = setting?.deadline_day || 10;
+            const deadlineTime = setting?.deadline_time || '12:00';
+            deadlineInfo.className = 'deadline-banner ok';
+            deadlineInfo.innerHTML = `📅 ${year}年${month}月のシフト希望入力期限: ${prevYear}年${prevMonth}月${deadlineDay}日${deadlineTime}まで`;
+          }
           deadlineInfo.style.display = 'block';
           document.getElementById('submitBtn').disabled = false;
         } else {
