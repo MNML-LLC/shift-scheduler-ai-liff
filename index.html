@@ -13,6 +13,8 @@
         --green-strong: #0f7a37;
         --red: #dc2626;
         --red-weak: #fee2e2;
+        --amber: #d97706;
+        --amber-weak: #fef3c7;
         --gray: #e5e7eb;
         --text: #111827;
         --muted: #6b7280;
@@ -249,9 +251,53 @@
       .small {
         font-size: 12px;
       }
+      /* ====== Toast (LINE Mini App では alert() 非対応のため) ====== */
+      #toastContainer {
+        position: fixed;
+        top: 12px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 9999;
+        pointer-events: none;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        width: min(92vw, 480px);
+      }
+      .toast {
+        pointer-events: auto;
+        max-width: 100%;
+        padding: 10px 14px;
+        border-radius: 10px;
+        font-size: 14px;
+        line-height: 1.4;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+        word-wrap: break-word;
+        cursor: pointer;
+        background: var(--card);
+        color: var(--text);
+        border: 1px solid var(--gray);
+      }
+      .toast.error {
+        background: var(--red-weak);
+        border-color: var(--red);
+        color: #7f1d1d;
+      }
+      .toast.info {
+        background: var(--amber-weak);
+        border-color: var(--amber);
+        color: #7c2d12;
+      }
+      .toast.success {
+        background: var(--green-weak);
+        border-color: var(--green);
+        color: var(--green-strong);
+      }
     </style>
   </head>
   <body>
+    <div id="toastContainer" aria-live="polite" aria-atomic="true"></div>
     <div class="container">
       <!-- ヘッダ -->
       <div class="card" style="margin-bottom: 12px">
@@ -667,7 +713,7 @@
           }
         } catch (error) {
           console.error('データ読み込みエラー:', error);
-          alert('スタッフ・店舗データの読み込みに失敗しました');
+          showToast('スタッフ・店舗データの読み込みに失敗しました', 'error');
         }
       }
 
@@ -824,21 +870,34 @@
         charCount.style.color = len > 450 ? 'var(--red)' : 'var(--muted)';
       }
 
+      // ====== Toast 通知（LINE Mini App は alert() 非対応） ======
+      function showToast(message, type = 'error', duration) {
+        const container = document.getElementById('toastContainer');
+        if (!container) return; // フェイルセーフ
+        const allowed = ['error', 'info', 'success'];
+        const kind = allowed.includes(type) ? type : 'info';
+        const ms =
+          typeof duration === 'number'
+            ? duration
+            : kind === 'success'
+              ? 3000
+              : 5000;
+
+        const node = document.createElement('div');
+        node.className = `toast ${kind}`;
+        node.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+        node.textContent = String(message ?? ''); // XSS 防止（innerHTML 禁止）
+        node.addEventListener('click', () => node.remove());
+        container.appendChild(node);
+
+        if (ms > 0) {
+          setTimeout(() => node.remove(), ms);
+        }
+      }
+
       // ====== コメントステータス更新 ======
       function updateCommentStatus(message, type) {
-        const status = document.getElementById('commentStatus');
-        status.textContent = message;
-        status.style.color =
-          type === 'success'
-            ? 'var(--green)'
-            : type === 'error'
-              ? 'var(--red)'
-              : 'var(--muted)';
-
-        // 3秒後にクリア
-        setTimeout(() => {
-          status.textContent = '';
-        }, 3000);
+        showToast(message, type);
       }
 
       // ====== 雇用形態を取得 ======
@@ -1262,7 +1321,7 @@
           }
         } catch (error) {
           console.error('LINE連携チェックエラー:', error);
-          alert('LINE連携状態の確認に失敗しました');
+          showToast('LINE連携状態の確認に失敗しました', 'error');
         }
       }
 
@@ -1504,14 +1563,17 @@
 
         // バリデーション
         if (!storeId || !name || !employmentType) {
-          alert('必須項目を入力してください');
+          showToast('必須項目を入力してください', 'error');
           return;
         }
 
         // 雇用形態から役職IDを自動判定
         const roleId = determineRoleIdFromEmploymentType(employmentType);
         if (!roleId) {
-          alert('役職の判定に失敗しました。雇用形態を正しく選択してください。');
+          showToast(
+            '役職の判定に失敗しました。雇用形態を正しく選択してください。',
+            'error'
+          );
           return;
         }
 
@@ -1744,21 +1806,22 @@
           const setting = deadlineSettingsMap.get(getEmploymentType());
           const deadlineDay = setting?.deadline_day || 10;
           const deadlineTime = setting?.deadline_time || '12:00';
-          alert(
-            `${year}年${month}月のシフト希望入力期限は${prevYear}年${prevMonth}月${deadlineDay}日${deadlineTime}で終了しました`
+          showToast(
+            `${year}年${month}月のシフト希望入力期限は${prevYear}年${prevMonth}月${deadlineDay}日${deadlineTime}で終了しました`,
+            'info'
           );
           return;
         }
 
         // 2. 第1案存在チェック
         if (role === 'part' && !firstPlanExists) {
-          alert(`現在シフトの入力が開始していません。`);
+          showToast(`現在シフトの入力が開始していません。`, 'info');
           return;
         }
         // 社員の場合：3パターン分岐
         if (role === 'emp') {
           if (!firstPlanExistsForEmp) {
-            alert(`現在シフトの入力が開始していません。`);
+            showToast(`現在シフトの入力が開始していません。`, 'info');
             return;
           }
           // else if (firstPlanWorkDays.length === 0) {
@@ -1932,21 +1995,22 @@
           const setting = deadlineSettingsMap.get(getEmploymentType());
           const deadlineDay = setting?.deadline_day || 10;
           const deadlineTime = setting?.deadline_time || '12:00';
-          alert(
-            `${year}年${month}月のシフト希望入力期限は${prevYear}年${prevMonth}月${deadlineDay}日${deadlineTime}で終了しました`
+          showToast(
+            `${year}年${month}月のシフト希望入力期限は${prevYear}年${prevMonth}月${deadlineDay}日${deadlineTime}で終了しました`,
+            'info'
           );
           return;
         }
 
         // 2. 第1案存在チェック
         if (role === 'part' && !firstPlanExists) {
-          alert(`現在シフトの入力が開始していません。`);
+          showToast(`現在シフトの入力が開始していません。`, 'info');
           return;
         }
         // 社員の場合：3パターン分岐
         if (role === 'emp') {
           if (!firstPlanExistsForEmp) {
-            alert(`現在シフトの入力が開始していません。`);
+            showToast(`現在シフトの入力が開始していません。`, 'info');
             return;
           }
           // else if (firstPlanWorkDays.length === 0) {
@@ -1958,7 +2022,7 @@
         }
 
         if (!selectedStaff) {
-          alert('スタッフを選択してください');
+          showToast('スタッフを選択してください', 'error');
           return;
         }
 
@@ -1968,7 +2032,7 @@
 
         // シフトもコメントもない場合はエラー
         if (!hasShifts && !hasComment) {
-          alert('シフト希望またはコメントを入力してください');
+          showToast('シフト希望またはコメントを入力してください', 'error');
           return;
         }
 
