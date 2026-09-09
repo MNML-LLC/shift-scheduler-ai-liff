@@ -2,8 +2,8 @@ name: Health Check
 
 on:
   schedule:
-    # 毎日 JST 09:00 (UTC 00:00)
-    - cron: '0 0 * * *'
+    # 5 回/日: JST 06:00 / 10:00 / 14:00 / 18:00 / 22:00 (UTC 21/01/05/09/13)
+    - cron: '0 21,1,5,9,13 * * *'
   workflow_dispatch:
 
 permissions:
