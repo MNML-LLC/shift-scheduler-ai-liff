@@ -10,7 +10,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: npm install -g vercel@latest
       - name: Deploy to Vercel (Production)
         if: github.ref == 'refs/heads/main'
