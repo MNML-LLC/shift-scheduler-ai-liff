@@ -618,8 +618,7 @@
   "plan_id": 123,
   "year": 2025,
   "month": 1
-}</pre
-              >
+}</pre>
             </td>
           </tr>
           <tr>
@@ -629,8 +628,7 @@
 {
   "success": true,
   "message": "Notification sent to group"
-}</pre
-              >
+}</pre>
             </td>
           </tr>
           <tr>
@@ -665,8 +663,7 @@
   "plan_id": 456,
   "year": 2025,
   "month": 1
-}</pre
-              >
+}</pre>
             </td>
           </tr>
           <tr>
@@ -676,8 +673,7 @@
 {
   "success": true,
   "message": "Notification sent to group"
-}</pre
-              >
+}</pre>
             </td>
           </tr>
           <tr>
@@ -731,8 +727,7 @@ if (process.env.LIFF_BACKEND_URL) {
     // 通知失敗は承認処理に影響させない（ログのみ）
     console.error('Failed to send LINE notification:', notifyError.message);
   }
-}</pre
-        >
+}</pre>
 
         <h4>
           ステータス更新エンドポイント PUT
@@ -758,8 +753,7 @@ if (status === 'APPROVED' && plan.plan_type === 'SECOND' && process.env.LIFF_BAC
     // 通知失敗は承認処理に影響させない（ログのみ）
     console.error('Failed to send LINE notification:', notifyError.message);
   }
-}</pre
-        >
+}</pre>
       </div>
 
       <!-- 通知フロー -->
@@ -1045,8 +1039,7 @@ if (status === 'APPROVED' && plan.plan_type === 'SECOND' && process.env.LIFF_BAC
         <pre>
 SELECT deadline_day, deadline_time, is_enabled
 FROM core.shift_deadline_settings
-WHERE tenant_id = $1 AND employment_type = 'PART_TIME'</pre
-        >
+WHERE tenant_id = $1 AND employment_type = 'PART_TIME'</pre>
 
         <table>
           <tr>
@@ -1117,8 +1110,7 @@ WHERE tenant_id = $1 AND employment_type = 'PART_TIME'</pre
     "timezone": "Asia/Tokyo",
     "enabled": true
   }
-}</pre
-      >
+}</pre>
 
       <!-- 環境別グループID管理 -->
       <h2>10.1 環境別グループID管理（設計）</h2>
@@ -1159,8 +1151,7 @@ WHERE tenant_id = $1 AND employment_type = 'PART_TIME'</pre
     }
   },
   ...
-}</pre
-      >
+}</pre>
 
       <h4>コード変更（lineService.js）</h4>
       <pre>
@@ -1194,8 +1185,7 @@ export function getGroupIdByTenant(tenantId) {
 
   console.log(`✅ Using group: ${group.name} (${envKey})`);
   return group.groupId;
-}</pre
-      >
+}</pre>
 
       <h4>ルックアップ優先順位</h4>
       <table>
@@ -1365,8 +1355,7 @@ export function getGroupIdByTenant(tenantId) {
 {targetMonth}月のシフト希望入力がまだの方は
 {deadline}までに入力をお願いします。
 
-入力はこちら: {liffUrl}</pre
-      >
+入力はこちら: {liffUrl}</pre>
 
       <h3>フェーズ2: 締切3日前（統計・アルバイトのみ）</h3>
       <pre>
@@ -1376,8 +1365,7 @@ export function getGroupIdByTenant(tenantId) {
 未提出: {unsubmittedCount}名
 
 {deadline}までにご提出ください。
-入力はこちら: {liffUrl}</pre
-      >
+入力はこちら: {liffUrl}</pre>
 
       <h3>フェーズ3: 締切前日（名前付き・アルバイトのみ）</h3>
       <pre>
@@ -1387,8 +1375,7 @@ export function getGroupIdByTenant(tenantId) {
 {unsubmittedNames}
 
 明日 {deadline} が締切です。
-入力はこちら: {liffUrl}</pre
-      >
+入力はこちら: {liffUrl}</pre>
 
       <h3>フェーズ4: 締切後</h3>
       <pre>
@@ -1396,8 +1383,7 @@ export function getGroupIdByTenant(tenantId) {
 
 {targetMonth}月分のシフト希望締切を過ぎました。
 
-未提出の方はオーナーの指示に従ってください。</pre
-      >
+未提出の方はオーナーの指示に従ってください。</pre>
 
       <h3>第1案承認通知</h3>
       <pre>
@@ -1407,15 +1393,13 @@ export function getGroupIdByTenant(tenantId) {
 シフト希望の入力が可能になりました。
 
 締切: {deadline}
-入力はこちら: {liffUrl}</pre
-      >
+入力はこちら: {liffUrl}</pre>
 
       <h3>フェーズ5: 第2案承認後</h3>
       <pre>
 【シフト確定のお知らせ】
 
-{targetMonth}月のシフトが確定しました。</pre
-      >
+{targetMonth}月のシフトが確定しました。</pre>
 
       <!-- テスト用エンドポイント -->
       <h2>13. テスト用エンドポイント</h2>
@@ -1437,8 +1421,7 @@ export function getGroupIdByTenant(tenantId) {
 {
   "year": 2026,
   "month": 1
-}</pre
-              >
+}</pre>
             </td>
           </tr>
           <tr>
@@ -1451,8 +1434,7 @@ export function getGroupIdByTenant(tenantId) {
   "notified": true,
   "phase": 1,
   "type": "anonymous"
-}</pre
-              >
+}</pre>
             </td>
           </tr>
           <tr>
@@ -1503,8 +1485,7 @@ export function getGroupIdByTenant(tenantId) {
 {
   "tenant_id": 3,
   "message": "テストメッセージ"
-}</pre
-              >
+}</pre>
             </td>
           </tr>
           <tr>
@@ -1593,8 +1574,7 @@ WHERE tenant_id = 3 AND employment_type = 'PART_TIME';
 -- 再開
 UPDATE core.shift_deadline_settings
 SET is_enabled = true
-WHERE tenant_id = 3 AND employment_type = 'PART_TIME';</pre
-      >
+WHERE tenant_id = 3 AND employment_type = 'PART_TIME';</pre>
 
       <!-- 今後の拡張 -->
       <h2>15. 今後の拡張（将来検討）</h2>
