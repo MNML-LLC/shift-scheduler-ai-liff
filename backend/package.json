@@ -16,8 +16,11 @@
   ],
   "author": "",
   "license": "ISC",
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
-    "@line/bot-sdk": "^9.3.0",
+    "@line/bot-sdk": "^11.2.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "node-cron": "^4.6.0",
