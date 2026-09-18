@@ -151,6 +151,14 @@ app.get('/', (req, res) => {
   });
 });
 
+// ヘルスチェック（監視用の明示エンドポイント）
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // 直近のcron実行サマリを返す（未発火時は null。個人情報は含めない）
 app.get('/api/cron-status', (req, res) => {
   res.json({ lastRun: lastCronRun });
@@ -304,6 +312,7 @@ app.listen(PORT, () => {
   console.log('===========================================');
   console.log('Available endpoints:');
   console.log('  GET  /                           - Health check');
+  console.log('  GET  /api/health                 - Health check (monitoring)');
   console.log('  GET  /api/cron-status            - Last cron run summary');
   console.log('  POST /api/webhook/line           - LINE Webhook');
   console.log('  POST /api/notification/first-plan-approved');
