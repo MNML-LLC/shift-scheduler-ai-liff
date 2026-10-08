@@ -20,5 +20,12 @@ permissions:
 
 jobs:
   claude-code:
+    # Issue #2606: reusable 側にも @claude ガードはあるが、caller 側でも二重にガード
+    # することで、reusable リゾルブ前に skip 判定させ、ワークフロー全体のノイズ
+    # （空振り run / failure conclusion 通知）をゼロにする。
+    # issues: opened / pull_request: closed はコメント経由ではないので従来通り実行。
+    if: |
+      (github.event_name != 'issue_comment' && github.event_name != 'pull_request_review_comment') ||
+      contains(github.event.comment.body, '@claude')
     uses: MNML-LLC/.github/.github/workflows/claude-reusable.yml@main
     secrets: inherit
